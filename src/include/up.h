@@ -5,16 +5,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define UP_BUF_SIZE 4096
-
 #define UPOLL_CTL_ADD 1
 #define UPOLL_CTL_DEL 2
 #define UPOLL_CTL_MOD 3
 
-#define UPOLLIN  1
-#define UPOLLOUT 2
-#define UPOLLERR 4
-#define UPOLLET  8
+#define UPOLLIN  0x01
+#define UPOLLOUT 0x02
+#define UPOLLET  0x04
+#define UPOLLERR 0x08
+
+typedef struct upoll upoll_t;
 
 typedef union upoll_data {
   void      *ptr;
@@ -28,21 +28,20 @@ typedef struct upoll_event {
   upoll_data_t  data;
 } upoll_event_t;
 
-int upoll_create();
-int upoll_ctl(int upfd, int op, int fd, struct upoll_event *event);
-int upoll_wait(int upfd, struct upoll_event *events, int maxevents, int timeout);
+upoll_t* upoll_create(uint32_t size);
+int upoll_ctl(upoll_t* upq, int op, intptr_t fd, upoll_event_t *event);
+int upoll_wait(upoll_t* upq, upoll_event_t *events, int maxevents, int timeout);
+void upoll_destroy(upoll_t* upq);
 
-int uclose(int fd);
-int ufdopen(intptr_t fd);
-int uread(int fd, char* buf, size_t len);
-int uwrite(int fd, const char* buf, size_t len);
+intptr_t usocket(int domain, int type, int proto);
+intptr_t uaccept(intptr_t sock);
 
-int usocket(int domain, int type, int proto);
-int ubind(int sock, const char* name, unsigned int port);
-int ulisten(int sock, int backlog);
-int uaccept(int server);
-int uconnect(int sock, const char* name, unsigned int port);
-int ushutdown(int sock);
+int ubind(intptr_t sock, const char* name, const char* serv);
+int ulisten(intptr_t sock, int backlog);
+int uconnect(intptr_t sock, const char* name, const char* serv);
+int uclose(intptr_t sock);
+int uread(intptr_t fd, char* buf, size_t len);
+int uwrite(intptr_t fd, const char* buf, size_t len);
 
 #endif /* _UP_H_ */
 

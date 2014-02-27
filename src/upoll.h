@@ -67,125 +67,44 @@
 # include <poll.h>
 #endif
 
-#define up_flags(D) ((D)->flags)
-#define up_fget(D,F) (up_flags(D) & (F))
-#define up_fset(D,F) (up_flags(D) |= (F))
-#define up_fclr(D,F) (up_flags(D) &= ~(F))
-
-#define UP_DELETE     0x10000000
-#define UP_CLEAR      0x20000000
-#define UP_EOF        0x40000000
-#define UP_ERROR      0x80000000
-
-typedef struct ufd    ufd_t;
-typedef struct utask  utask_t;
+typedef struct unote  unote_t;
 typedef struct ulist  ulist_t;
-typedef struct upoll  upoll_t;
-typedef struct utable utable_t;
-
-typedef int (*upoll_react_t)(ufd_t*, uint32_t);
-typedef int (*utask_apply_t)(utask_t*, uint32_t);
+typedef struct uitem  uitem_t;
+typedef struct uhash  uhash_t;
 
 struct ulist {
   ulist_t*  next;
   ulist_t*  prev;
 };
 
+struct uitem {
+  ulist_t   list;
+  intptr_t  key;
+  void*     val;
+};
+
+struct uhash {
+  uint16_t  count;
+  uint16_t  size;
+  ulist_t*  items;
+};
+
 struct upoll {
-  ulist_t       alive;          /* all tasks this queue knows about */
-  ulist_t       clean;          /* tasks which need cleaning up */
-  ulist_t       ready;          /* tasks with pending events */
+  int           fd;             /* backend fd (epoll, kqueue) */
+  ulist_t       alive;          /* all notes this queue knows about */
+  ulist_t       clean;          /* notes which need cleaning up */
+  ulist_t       ready;          /* notes with pending events */
+  uhash_t*      table;
 };
 
-struct utask {
+struct unote {
   upoll_event_t event;
-  uint16_t      flags;
-  uint32_t      events;
-
-  ulist_t       queue;          /* handle for the queue's tasks */
-  ulist_t       ready;          /* handle for the ready queue */
-  ulist_t       tasks;          /* handle for the ufd */
-
-  upoll_t*      upoll;
-  utask_apply_t apply;
-  ufd_t*        ufd;
-  void*         data;
-};
-
-typedef struct {
-  char    base[UP_BUF_SIZE];
-  size_t  nput;
-  size_t  nget;
-} ubuf_t;
-
-typedef int ufile_t;
-typedef intptr_t usock_t;
-
-typedef int (*uop_react)(ufd_t*, uint32_t hint);
-typedef int (*uop_drain)(ufd_t*, uint32_t hint);
-typedef int (*uop_flush)(ufd_t*, uint32_t hint);
-typedef int (*uop_init)(ufd_t*);
-typedef int (*uop_open)(ufd_t*, const char*, int, int);
-typedef int (*uop_read)(ufd_t*, char*, size_t);
-typedef int (*uop_seek)(ufd_t*, int64_t);
-typedef int (*uop_write)(ufd_t*, const char*, size_t);
-typedef int (*uop_bind)(ufd_t*, const char*, unsigned int);
-typedef int (*uop_listen)(ufd_t*, int);
-typedef int (*uop_accept)(ufd_t*);
-typedef int (*uop_shutdown)(ufd_t*);
-typedef int (*uop_connect)(ufd_t*, const char*, unsigned int);
-typedef int (*uop_send)(ufd_t*, const void*, size_t, const struct sockaddr*);
-typedef int (*uop_recv)(ufd_t*, void*, size_t, const struct sockaddr*);
-typedef int (*uop_close)(ufd_t*);
-
-typedef struct uops {
-  uop_react     react;
-  uop_drain     drain;
-  uop_flush     flush;
-  uop_close     close;
-  uop_init      init;
-  uop_read      read;
-  uop_seek      seek;
-  uop_write     write;
-  uop_bind      bind;
-  uop_listen    listen;
-  uop_accept    accept;
-  uop_shutdown  shutdown;
-  uop_connect   connect;
-  uop_send      send;
-  uop_recv      recv;
-} uops_t;
-
-struct ufd {
-  int           fileno;
-  int           flags;
   intptr_t      fd;
-  int           refcnt;
-  int           error;
-  ulist_t       tasks;
-  ubuf_t        rdbuf;
-  ubuf_t        wrbuf;
-  int           info[3];
-  void*         data;
-  uops_t*       ops;
+  uint32_t      events;
+  ulist_t       queue;          /* handle for the queue's notes */
+  ulist_t       ready;          /* handle for the ready queue */
+  upoll_t*      upoll;
 };
-
-typedef struct usock_info {
-  int domain, type, proto;
-} usock_info_t;
-
-struct utable {
-  size_t        size;
-  size_t        nfds;
-  ufd_t**       ufds;
-};
-
-ufd_t* ufd_open(void);
-ufd_t* ufd_find(int fileno);
-int ufd_close(int fileno);
-
-void utask(ulist_t* tasks, uint32_t hint);
-static int utask_apply(utask_t* task, uint32_t hint);
 
 #define container_of(ptr, type, member) \
   ((type*) ((char*)(ptr) - offsetof(type, member)))
@@ -201,8 +120,14 @@ static int utask_apply(utask_t* task, uint32_t hint);
 #define ulist_empty(h) (h == (h)->prev)
 
 #define ulist_append(h, x) \
-  (x)->prev = (h)->prev; (x)->prev->next = x; \
+  (x)->prev = (h)->prev;   \
+  (x)->prev->next = x;     \
   (x)->next = h; (h)->prev = x
+
+#define ulist_insert(h, x) \
+    (x)->next = (h)->next;  \
+    (x)->next->prev = x;    \
+    (x)->prev = h; (h)->next = x
 
 #define ulist_remove(x) \
   (x)->next->prev = (x)->prev; \
