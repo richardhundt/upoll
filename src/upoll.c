@@ -142,8 +142,12 @@ int upoll_ctl_kqueue(upoll_t* upq, int op, unote_t* note, upoll_event_t* event) 
       }
     }
     case UPOLL_CTL_DEL: {
-      EV_SET(&kch[nch++], note->fd, EVFILT_READ, EV_DELETE, 0, 0, note);
-      EV_SET(&kch[nch++], note->fd, EVFILT_WRITE, EV_DELETE, 0, 0, note);
+      if (event->events & UPOLLIN) {
+        EV_SET(&kch[nch++], note->fd, EVFILT_READ, EV_DELETE, 0, 0, note);
+      }
+      if (event->events & UPOLLOUT) {
+        EV_SET(&kch[nch++], note->fd, EVFILT_WRITE, EV_DELETE, 0, 0, note);
+      }
     }
     case UPOLL_CTL_MOD: {
       if (event->events & UPOLLIN) {
