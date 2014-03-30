@@ -42,6 +42,7 @@ int uconnect(intptr_t sock, const char* name, const char* serv);
 int uclose(intptr_t sock);
 int uread(intptr_t fd, char* buf, size_t len);
 int uwrite(intptr_t fd, const char* buf, size_t len);
+int usocketpair(intptr_t socks[2], int async);
 
 #endif /* _UP_H_ */
 
