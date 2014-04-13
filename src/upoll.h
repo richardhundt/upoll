@@ -43,12 +43,7 @@
 # include <arpa/inet.h>
 #endif
 
-#if defined(__APPLE__) || defined(__DragonFly__) \
- || defined(__FreeBSD__) || defined(__OpenBSD__) \
- || defined(__NetBSD__)
-# undef HAVE_KQUEUE
-# define HAVE_KQUEUE 1
-#elif defined(__linux__)
+#if defined(__linux__)
 # undef HAVE_EPOLL
 # define HAVE_EPOLL 1
 #elif (defined(__POSIX_VERSION) && (__POSIX_VERSION >= 200112L))
@@ -59,9 +54,7 @@
 # define HAVE_SELECT 1
 #endif
 
-#if defined(HAVE_KQUEUE)
-# include <sys/event.h>
-#elif defined(HAVE_EPOLL)
+#if defined(HAVE_EPOLL)
 # include <sys/epoll.h>
 #elif defined(HAVE_POLL)
 # include <poll.h>
@@ -92,17 +85,13 @@ struct uhash {
 struct upoll {
   int           fd;             /* backend fd (epoll, kqueue) */
   ulist_t       alive;          /* all notes this queue knows about */
-  ulist_t       clean;          /* notes which need cleaning up */
-  ulist_t       ready;          /* notes with pending events */
   uhash_t*      table;
 };
 
 struct unote {
   upoll_event_t event;
   intptr_t      fd;
-  uint32_t      events;
   ulist_t       queue;          /* handle for the queue's notes */
-  ulist_t       ready;          /* handle for the ready queue */
   upoll_t*      upoll;
 };
 

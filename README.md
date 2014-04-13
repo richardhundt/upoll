@@ -4,10 +4,11 @@ upoll - epoll for the epoll impaired
 
 # DESCRIPTION
 
-Wraps `kqueue`, `epoll`, `poll` and `select` providing a consistent interface
-modelled after `epoll`. The reason for this madness is that although there are
-plenty of event loop implementations out there (libuv, libev, libevent, etc.),
-I couldn't find one that just lets me poll via a pull-style API.
+Wraps `epoll`, `poll` and `select` providing a consistent interface
+modelled after `epoll`. The reason for this madness is that although
+there are plenty of event loop implementations out there (libuv,
+libev, libevent, etc.), I couldn't find one that just lets me poll
+via a pull-style API.
 
 See the example for usage details. Also, it's really very young. Expect segfaults
 and other weirdness.

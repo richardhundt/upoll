@@ -68,29 +68,15 @@ static int uhash_destroy(uhash_t* hash) {
   }
   return 0;
 }
-static int upoll_note(unote_t* note, uint32_t hint) {
-  note->events = hint;
-  note->events &= (note->event.events | UPOLLERR);
-  if (ulist_empty(&note->ready)) {
-    ulist_remove(&note->queue);
-    ulist_append(&note->upoll->ready, &note->ready);
-  }
-  return note->events;
-}
 
 upoll_t* upoll_create(uint32_t size) {
   assert(size > 0);
   upoll_t* upq = (upoll_t*)calloc(1, sizeof(upoll_t));
 
   ulist_init(&upq->alive);
-  ulist_init(&upq->clean);
-  ulist_init(&upq->ready);
 
   upq->table = uhash_create(size);
-#if defined(HAVE_KQUEUE)
-  upq->fd = kqueue();
-  assert(upq->fd >= 0);
-#elif defined(HAVE_EPOLL)
+#if defined(HAVE_EPOLL)
   upq->fd = epoll_create(1);
   assert(upq->fd >= 0);
 #endif
@@ -104,12 +90,6 @@ void upoll_destroy(upoll_t* upq) {
   unote_t* n;
   while (!ulist_empty(&upq->alive)) {
     q = ulist_next(&upq->alive);
-    n = ulist_data(n, unote_t, queue);
-    ulist_remove(q);
-    free(n);
-  }
-  while (!ulist_empty(&upq->clean)) {
-    q = ulist_next(&upq->clean);
     n = ulist_data(n, unote_t, queue);
     ulist_remove(q);
     free(n);
@@ -224,22 +204,11 @@ int upoll_ctl(upoll_t* upq, int op, intptr_t fd, upoll_event_t* event) {
     case UPOLL_CTL_ADD: {
       note = (unote_t*)uhash_lookup(upq->table, fd);
       if (!note) {
-        if (ulist_empty(&upq->clean)) {
-          note = (unote_t*)calloc(1, sizeof(unote_t));
-          ulist_init(&note->queue);
-          ulist_init(&note->ready);
-        }
-        else {
-          ulist_t* item = ulist_next(&upq->clean);
-          ulist_remove(item);
-          note = ulist_data(item, unote_t, queue);
-        }
+        note = (unote_t*)calloc(1, sizeof(unote_t));
         note->upoll = upq;
+        ulist_init(&note->queue);
         note->event = *event;
-        note->events = 0;
-
         note->fd = fd;
-
         ulist_append(&upq->alive, &note->queue);
         uhash_insert(upq->table, fd, (void*)note);
       }
@@ -249,98 +218,56 @@ int upoll_ctl(upoll_t* upq, int op, intptr_t fd, upoll_event_t* event) {
       note = (unote_t*)uhash_lookup(upq->table, fd);
       if (!note) return -ENOENT;
       event = &note->event;
-      ulist_remove(&note->ready);
       ulist_remove(&note->queue);
-      ulist_append(&upq->clean, &note->queue);
       uhash_delete(upq->table, fd);
+      free(note);
       break;
     }
     case UPOLL_CTL_MOD: {
       note = (unote_t*)uhash_lookup(upq->table, fd);
       if (!note) return -ENOENT;
       note->event = *event;
-      note->events = 0;
-      ulist_remove(&note->ready);
-      ulist_remove(&note->queue);
-      ulist_append(&upq->alive, &note->queue);
       break;
     }
     default: {
       return -EINVAL;
     }
   }
-#if defined(HAVE_KQUEUE)
-  return upoll_ctl_kqueue(upq, op, note, event);
-#elif defined(HAVE_EPOLL)
+#if defined(HAVE_EPOLL)
   return upoll_ctl_epoll(upq, op, note, event);
 #else
   return 0;
 #endif
 }
 
-#if defined(HAVE_KQUEUE)
-int upoll_wait_kqueue(upoll_t* upq, int nev, int timeout) {
+#if defined(HAVE_EPOLL)
+int upoll_wait_epoll(upoll_t* upq, upoll_event_t* evs, int nev, int timeout) {
+  struct epoll_event evts[nev];
   int i, n;
-  int nkev = nev * 2;
-  struct timespec  ts;
-  struct timespec* tsp = &ts;
 
-  struct kevent kevs[nkev];
-
-  ts.tv_nsec = 0;
-  if (timeout < 0) {
-    tsp = NULL;
-  }
-  else if (timeout == 0)  
-    ts.tv_sec = 0;
-  else {
-    ts.tv_sec  = (timeout / 1000);
-    ts.tv_nsec = (timeout % 1000) * 1000000;
-  }
-
-  n = kevent(upq->fd, NULL, 0, kevs, nkev, tsp);
+  n = epoll_wait(upq->fd, evts, nev, timeout);
   if (n < 0) return -errno;
 
   for (i = 0; i < n; i++) {
-    uint32_t hint = 0;
-    unote_t* n = (unote_t*)kevs[i].udata;
-    if (kevs[i].filter == EVFILT_READ) {
-      hint = UPOLLIN;
-    }
-    else if (kevs[i].filter == EVFILT_WRITE) {
-      hint = UPOLLOUT;
-    }
-    if (kevs[i].flags & EV_ERROR) {
-      hint &= ~UPOLLOUT;
-      hint |= UPOLLERR;
-    }
-    upoll_note(n, hint);
-  }
-
-  return n;
-}
-#elif defined(HAVE_EPOLL)
-int upoll_wait_epoll(upoll_t* upq, int nev, int timeout) {
-  struct epoll_event evts[nev];
-  int i, n;
-  n = epoll_wait(upq->fd, evts, nev, timeout);
-  for (i = 0; i < n; i++) {
     uint32_t hint;
-    unote_t* n = (unote_t*)evts[i].data.ptr;
+    unote_t* note = (unote_t*)evts[i].data.ptr;
     if (evts[i].events & EPOLLIN) hint |= UPOLLIN;
     if (evts[i].events & EPOLLOUT) hint |= UPOLLOUT;
-    if (evts[i].events & (EPOLLERR|EPOLLHUP)) hint |= UPOLLERR;
-    upoll_note(n, hint);
+    if (evts[i].events & (EPOLLERR|EPOLLHUP)) hint |= (UPOLLERR|UPOLLIN);
+
+    evs[i].data = note->event.data;
+    evs[i].events = hint;
   }
   return n;
 }
 #elif defined(HAVE_POLL)
-int upoll_wait_poll(upoll_t* upq, int nev, int timeout) {
+int upoll_wait_poll(upoll_t* upq, upoll_event_t* evs, int nev, int timeout) {
   /* FD_SETSIZE should be smaller than OPEN_MAX, but OPEN_MAX isn't portable */
   if (nev > FD_SETSIZE) nev = FD_SETSIZE;
 
   unote_t*  nvec[nev];
   int r, i, nfds = 0;
+  uint32_t hint;
   struct pollfd pfds[nev];
 
   unote_t* n = NULL;
@@ -353,8 +280,6 @@ int upoll_wait_poll(upoll_t* upq, int nev, int timeout) {
 
     ulist_remove(&n->queue);
     ulist_insert(&upq->alive, &n->queue);
-
-    assert(ulist_empty(&n->ready));
 
     nvec[nfds] = n;
     pfds[nfds].events = 0;
@@ -369,27 +294,33 @@ int upoll_wait_poll(upoll_t* upq, int nev, int timeout) {
   }
 
   r = poll(pfds, nfds, timeout);
-  if (r > 0) {
-    uint32_t hint = 0;
-    for (i = 0; i < nfds; i++) {
-      hint = 0;
-      if (pfds[i].revents) {
-        if (pfds[i].revents & POLLIN ) hint |= UPOLLIN;
-        if (pfds[i].revents & POLLOUT) hint |= UPOLLOUT;
-        if (pfds[i].revents & (POLLERR|POLLNVAL)) hint |= UPOLLERR;
-        upoll_note(nvec[i], hint);
-      }
+  if (r < 0) return -errno;
+
+  int e = 0;
+  for (i = 0; i < nfds && e < nev; i++) {
+    hint = 0;
+    if (pfds[i].revents) {
+      n = nvec[i];
+      if (pfds[i].revents & POLLIN ) hint |= UPOLLIN;
+      if (pfds[i].revents & POLLOUT) hint |= UPOLLOUT;
+      if (pfds[i].revents & (POLLERR|POLLNVAL|POLLHUP)) hint |= (UPOLLERR|UPOLLIN);
+
+      if (hint & UPOLLERR) hint &= ~UPOLLOUT;
+
+      evs[e].data = n->event.data;
+      evs[e].events = hint;
+      ++e;
     }
   }
 
-  return r;
+  return e;
 }
 #else
-int upoll_wait_select(upoll_t* upq, int nev, int timeout) {
+int upoll_wait_select(upoll_t* upq, upoll_event_t* evs, int nev, int timeout) {
   if (nev > FD_SETSIZE) nev = FD_SETSIZE;
 
   unote_t* nvec[nev];
-  int i, maxfd = 0, r = 0, nfds = 0;
+  int i, maxfd = 0, e = 0, nfds = 0;
 
   fd_set pollin, pollout, pollerr;
 
@@ -422,8 +353,6 @@ int upoll_wait_select(upoll_t* upq, int nev, int timeout) {
     ulist_remove(&n->queue);
     ulist_insert(&upq->alive, &n->queue);
 
-    assert(ulist_empty(&n->ready));
-
     nvec[nfds] = n;
     if (n->event.events & UPOLLIN) {
       FD_SET(n->fd, &pollin);
@@ -440,73 +369,50 @@ int upoll_wait_select(upoll_t* upq, int nev, int timeout) {
   int rc = select(0, &pollin, &pollout, &pollerr, tvp);
   if (rc == SOCKET_ERROR) {
     assert(WSAGetLastError() == WSAENOTSOCK);
-    return -1;
+    return -WSAGetLastError();
   }
 # else
   int rc = select(maxfd + 1, &pollin, &pollout, &pollerr, tvp);
   if (rc == -1) {
     assert(errno == EINTR || errno == EBADF);
-    return -1;
+    return -errno;
   }
 # endif
-  r = 0;
-  for (i = 0; i < nfds; i++) {
+  e = 0;
+  for (i = 0; i < nfds && e < nev; i++) {
     uint32_t hint = 0;
-    if (FD_ISSET(nvec[i]->fd, &pollin)) {
+    unote_t* n = nvec[i];
+    if (FD_ISSET(n->fd, &pollin)) {
       hint |= UPOLLIN;
     }
 
-    if (FD_ISSET(nvec[i]->fd, &pollerr)) {
-      hint |= UPOLLERR;
+    if (FD_ISSET(n->fd, &pollerr)) {
+      hint |= (UPOLLERR | UPOLLIN);
     }
-    else if (FD_ISSET(nvec[i]->fd, &pollout)) {
+    else if (FD_ISSET(n->fd, &pollout)) {
       hint |= UPOLLOUT;
     }
 
     if (hint) {
-      upoll_note(nvec[i], hint);
-      r++;
+      evs[e].data = n->event.data;
+      evs[e].events = hint;
+      ++e;
     }
   }
-  return r;
+  return e;
 }
 #endif
 
 int upoll_wait(upoll_t* upq, upoll_event_t *evs, int nev, int timeout) {
-  int e = 0;
-
-  unote_t* n = NULL;
-  ulist_t* s;
-  ulist_t* q;
-
-  if (ulist_empty(&upq->ready)) {
-#if defined(HAVE_KQUEUE)
-    upoll_wait_kqueue(upq, nev, timeout);
-#elif defined(HAVE_EPOLL)
-    upoll_wait_epoll(upq, nev, timeout);
+  int r = 0;
+#if defined(HAVE_EPOLL)
+  r = upoll_wait_epoll(upq, evs, nev, timeout);
 #elif defined(HAVE_POLL)
-    upoll_wait_poll(upq, nev, timeout);
+  r = upoll_wait_poll(upq, evs, nev, timeout);
 #else
-    upoll_wait_select(upq, nev, timeout);
+  r = upoll_wait_select(upq, evs, nev, timeout);
 #endif
-  }
-
-  s = ulist_mark(&upq->ready);
-  q = ulist_next(&upq->ready);
-
-  while (q != s && e < nev) {
-    n = ulist_data(q, unote_t, ready);
-    q = ulist_next(q);
-    ulist_remove(&n->ready);
-    ulist_remove(&n->queue);
-    evs[e].events = n->events;
-    evs[e].data   = n->event.data;
-    ulist_append(&upq->alive, &n->queue);
-    n->events = 0;
-    e++;
-  }
-
-  return e;
+  return r;
 }
 
 intptr_t usocket(int domain, int type, int proto) {
