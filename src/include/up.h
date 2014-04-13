@@ -11,8 +11,8 @@
 
 #define UPOLLIN  0x01
 #define UPOLLOUT 0x02
-#define UPOLLET  0x04
-#define UPOLLERR 0x08
+#define UPOLLERR 0x04
+#define UPOLLET  0x08
 
 typedef struct upoll upoll_t;
 
