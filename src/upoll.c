@@ -94,71 +94,13 @@ void upoll_destroy(upoll_t* upq) {
     ulist_remove(q);
     free(n);
   }
-#if defined(HAVE_KQUEUE) || defined(HAVE_EPOLL)
+#if defined(HAVE_EPOLL)
   close(upq->fd);
 #endif
   free(upq);
 }
 
-#if defined(HAVE_KQUEUE)
-int upoll_ctl_kqueue(upoll_t* upq, int op, unote_t* note, upoll_event_t* event) {
-
-  struct timespec ts;
-  ts.tv_sec  = 0;
-  ts.tv_nsec = 0;
-
-  struct kevent kch[4];
-  int nch = 0, rc = 0, i = 0;
-  int flags = EV_RECEIPT;
-  switch (op) {
-    case UPOLL_CTL_ADD: {
-      flags |= (EV_ADD | EV_ENABLE);
-      if (event->events & UPOLLET) flags |= EV_CLEAR;
-      if (event->events & UPOLLIN) {
-        EV_SET(&kch[nch++], note->fd, EVFILT_READ, flags, 0, 0, note);
-      }
-      if (event->events & UPOLLOUT) {
-        EV_SET(&kch[nch++], note->fd, EVFILT_WRITE, flags, 0, 0, note);
-      }
-    }
-    case UPOLL_CTL_DEL: {
-      if (event->events & UPOLLIN) {
-        EV_SET(&kch[nch++], note->fd, EVFILT_READ, EV_DELETE, 0, 0, note);
-      }
-      if (event->events & UPOLLOUT) {
-        EV_SET(&kch[nch++], note->fd, EVFILT_WRITE, EV_DELETE, 0, 0, note);
-      }
-    }
-    case UPOLL_CTL_MOD: {
-      if (event->events & UPOLLIN) {
-        flags |= (EV_ADD | EV_ENABLE);
-        if (event->events & UPOLLET) flags |= EV_CLEAR;
-        EV_SET(&kch[nch++], note->fd, EVFILT_READ, flags, 0, 0, note);
-      }
-      else {
-        flags |= (EV_ADD | EV_DISABLE);
-        EV_SET(&kch[nch++], note->fd, EVFILT_READ, flags, 0, 0, note);
-      }
-      flags = EV_RECEIPT;
-      if (event->events & UPOLLOUT) {
-        flags |= (EV_ADD | EV_ENABLE);
-        if (event->events & UPOLLET) flags |= EV_CLEAR;
-        EV_SET(&kch[nch++], note->fd, EVFILT_WRITE, flags, 0, 0, note);
-      }
-      else {
-        flags |= (EV_ADD | EV_DISABLE);
-        EV_SET(&kch[nch++], note->fd, EVFILT_WRITE, flags, 0, 0, note);
-      }
-    }
-  }
-  rc = kevent(upq->fd, kch, nch, kch, nch, &ts);
-  if (rc < 0) return -errno;
-  for (i = 0; i < rc; i++) {
-    if (kch[i].data) return -kch[i].data;
-  }
-  return 0;
-}
-#elif defined(HAVE_EPOLL)
+#if defined(HAVE_EPOLL)
 int upoll_ctl_epoll(upoll_t* upq, int op, unote_t* note, upoll_event_t* event) {
   assert(upq->fd >= 0);
   struct epoll_event evt;

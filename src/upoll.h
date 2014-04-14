@@ -46,7 +46,7 @@
 #if defined(__linux__)
 # undef HAVE_EPOLL
 # define HAVE_EPOLL 1
-#elif (defined(__POSIX_VERSION) && (__POSIX_VERSION >= 200112L))
+#elif defined(__unix__) || (defined (__APPLE__) && defined (__MACH__))
 # undef HAVE_POLL
 # define HAVE_POLL 1
 #else
