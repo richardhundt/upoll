@@ -191,7 +191,7 @@ int upoll_wait_epoll(upoll_t* upq, upoll_event_t* evs, int nev, int timeout) {
   if (n < 0) return -errno;
 
   for (i = 0; i < n; i++) {
-    uint32_t hint;
+    uint32_t hint = 0;
     unote_t* note = (unote_t*)evts[i].data.ptr;
     if (evts[i].events & EPOLLIN) hint |= UPOLLIN;
     if (evts[i].events & EPOLLOUT) hint |= UPOLLOUT;
